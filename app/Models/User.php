@@ -5,6 +5,7 @@ namespace App\Models;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -24,6 +25,7 @@ class User extends Authenticatable
         'username',
         'email',
         'password',
+        'profile_image',
     ];
 
     /**
@@ -51,5 +53,24 @@ class User extends Authenticatable
     public function feeds(): HasMany
     {
         return $this->hasMany(Feed::class);
+    }
+    public function profile(): HasOne
+    {
+        return $this->hasOne(Profile::class);
+    }
+    public function comments(): HasMany
+    {
+        return $this->hasMany(Comment::class);
+    }
+
+    public function likedComments()
+    {
+        return $this->belongsToMany(Comment::class, 'comment_likes')
+            ->withTimestamps();
+    }
+
+    public function likedFeeds()
+    {
+        return $this->belongsToMany(Feed::class, 'Feed_likes');
     }
 }

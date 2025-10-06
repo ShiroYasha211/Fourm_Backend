@@ -34,6 +34,24 @@ public function showUser(User $user)
         'user'=> $user->all(),
         ],200);
 }
+
+public function showCurrentUser(Request $request)
+{
+    $user = $request->user();
+    if (!$user) {
+        return response(
+            ['message' => 'user is not found',],
+            401
+        );
+    }
+    return response(
+        [
+            'user'=> $user,
+        ],200
+        );
+    }
+
+
 public function Login(LoginRequest $request)
 {
     $request->validated();
@@ -56,5 +74,27 @@ if (!Hash::check($request->password, $user->password)) {
 
         ], 200);
 
+}
+public function resetPassword(Request $request)
+{
+    $request->validate([
+        'email' => 'required|email',
+        'username' => 'required|string|min:4',
+        'password' => 'required|min:6',
+    ]);
+
+    $user = User::where('email', $request->email)->where('username', $request->username)->first();
+    if (!$user) {
+        return response([
+            'message' => 'User not found',
+        ], 404);
+    }
+
+    $user->password = Hash::make($request->password);
+    $user->save();
+
+    return response([
+        'message' => 'Password reset successfully',
+    ], 200);
 }
 }

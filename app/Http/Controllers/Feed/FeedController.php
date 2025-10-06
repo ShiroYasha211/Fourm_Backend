@@ -3,102 +3,131 @@
 namespace App\Http\Controllers\Feed;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\postRequest;
+use App\Http\Requests\PostRequest;
 use App\Models\Comment;
 use App\Models\Feed;
-use App\Models\Like;
-use Illuminate\Container\Attributes\Auth;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class FeedController extends Controller
 {
     public function index()
     {
-        $feeds = Feed::with("user")->latest()->get();
+        $feeds = Feed::with(['user', 'likes'])
+            ->withCount(['comments', 'likes'])
+            ->latest()
+            ->get()
+            ->map(function ($feed) {
+                $feed->is_liked = $feed->likes->contains('id', Auth::id());
+                return $feed;
+            });
+
         return response([
-            "feeds"=> $feeds
-        ],200);
-        
-
-
+            "feeds" => $feeds
+        ], 200);
     }
-    public function store(postRequest $request)
+
+    public function store(PostRequest $request)
     {
         $request->validated();
 
-        auth()->user()->feeds()->create([
+        $feed = auth()->user()->feeds()->create([
             'content' => $request->content,
-
         ]);
-        return response([
-            'message'=> 'success',
-        ], 201);
 
+        return response([
+            'message' => 'Post created successfully',
+            'feed' => $feed
+        ], 201);
     }
 
-    public function likePost($feed_id)
+    public function toggleLike($feed_id)
     {
-        $feed = Feed::whereId($feed_id)->first();
+        $feed = Feed::findOrFail($feed_id);
+        $user = auth()->user();
 
-        if (!$feed) {
-            return response([
-                'message'=> '404 not found',
-                ],500);
-            }
-        $unlike = Like::where('user_id', auth()->id())->where("feed_id",$feed_id)->delete();
-        if ($unlike) {
-            return response([
-                "message"=> "Unlike",
-                ],200);
-            }
-        $like = Like::create([
-            "user_id"=> auth()->id(),
-            "feed_id"=> $feed_id,
+        $feed->likes()->toggle($user->id);
+
+        return response([
+            'message' => $feed->likes()->where('user_id', $user->id)->exists() ? 'Liked' : 'Unliked',
+            'likes_count' => $feed->likes()->count(),
+            'is_liked' => $feed->likes()->where('user_id', $user->id)->exists()
+        ], 200);
+    }
+
+    public function comment(Request $request, $feed_id)
+    {
+        $request->validate([
+            'body' => 'required|string|max:1000',
+            'parent_id' => 'nullable|exists:comments,id',
         ]);
-        if ($like) {
-            return response([
-                "message"=> "Liked",
-                ],200);
-            }
-}
-public function comment(Request $request , $feed_id)
-{
-    $request->validate([
-        'body' =>'required',
-    ]);
-    // $comment = Comment::create(
-    //     [
-    //         "user_id"=> auth()->id(),
-    //         "feed_id"=> $feed_id,
-    //         "body" => $request->body,
-    //         ]
-    //     );
-    $comment = Comment::create([
-        "user_id"=> auth()->id(),
-        "feed_id"=> $feed_id,
-        "body" => $request->body,
-    ]);
-        // return response(
-        //     [
-        //         "feed_id" => $feed_id,
-        //         "message" => "Success",
-        //     ]
-        //     );
-    return response([
-        "user_id" => $comment->user_id,
-        "feed_id"=> $comment->feed_id,
-        'body' => $comment->body,
-        "message"=> "success",
-        ],200);
-}
-public function getComments($feed_id)
-{
-    $comments = Comment::with("user")->with("feed")->whereFeedId($feed_id)->latest()->get();
 
-    return response([
-        
-        "comments"=> $comments,
-        ]
-    ,200);
-}
+        $comment = Comment::create([
+            "user_id" => auth()->id(),
+            "feed_id" => $feed_id,
+            "body" => $request->body,
+            "parent_id" => $request->parent_id,
+        ]);
+
+        $comment->load(['user', 'replies.user'])
+            ->loadCount(['replies', 'likes'])
+            ->loadExists(['likes' => function($q) {
+                $q->where('user_id', auth()->id());
+            }]);
+
+        return response()->json([
+            'comment' => $comment,
+            'message' => 'Comment added successfully'
+        ], 201);
+    }
+
+    public function getComments($feed_id)
+    {
+        $comments = Comment::with(['user', 'replies.user'])
+            ->withCount(['replies', 'likes'])
+            ->withExists(['likes' => function($q) {
+                $q->where('user_id', auth()->id());
+            }])
+            ->whereNull('parent_id')
+            ->whereFeedId($feed_id)
+            ->latest()
+            ->get();
+
+        return response([
+            "comments" => $comments,
+            "count" => $comments->count()
+        ], 200);
+    }
+
+    public function getLikers($feed_id)
+    {
+        $likers = Feed::findOrFail($feed_id)
+            ->likes()
+            ->select(['users.id', 'users.name', 'users.profile_image'])
+            ->orderBy('feed_likes.created_at', 'desc')
+            ->paginate(10);
+
+        return response([
+            "likers" => $likers,
+            "count" => $likers->total()
+        ], 200);
+    }
+
+    public function destroy($id){
+        $post = Feed::findOrFail($id);
+
+        if(Auth::id() == $post->user_id)
+        {
+            $post->delete();
+            return response()->json([
+                'message' => 'Post Deleted Successfully'
+            ],200);
+        }
+        if(Auth::id() !== $post->user_id)
+        {
+            return response()->json([
+                'message' => 'You Cant delete this post'
+            ]);
+        }
+    }
 }
